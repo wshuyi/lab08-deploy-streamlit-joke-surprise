@@ -3,3 +3,4 @@ pandas
 scikit_surprise
 streamlit==1.23.1
 surprise
+openpyxl
