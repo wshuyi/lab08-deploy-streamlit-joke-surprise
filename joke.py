@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from surprise import SVD, Dataset, Reader
 
-@st.cache
+@st.cache_data
 def load_data():
     # Load the data
     data_df = pd.read_excel('jester-data/[final] April 2015 to Nov 30 2019 - Transformed Jester Data - .xlsx')
@@ -41,7 +41,7 @@ def train_model(data_df):
 
 def recommend_jokes(algo, data_df, jokes_df, new_user_id, new_ratings):
     # Convert ratings from 0-5 scale to -10 to 10 scale
-    new_ratings = {joke_id: rating*4 - 10 for joke_id, rating in new_ratings.items()}
+    new_ratings = {joke_id: info['rating']*4 - 10 for joke_id, info in new_ratings.items()}
 
     # Add new user's ratings to the data
     new_ratings_df = pd.DataFrame({
@@ -67,6 +67,8 @@ def recommend_jokes(algo, data_df, jokes_df, new_user_id, new_ratings):
 
     return top_5_jokes
 
+
+
 def main():
     # Load data
     data_df, jokes_df = load_data()
@@ -74,41 +76,50 @@ def main():
     # Choose an unused user_id for the new user
     new_user_id = data_df['user_id'].max() + 1
 
-    # Randomly display 3 jokes for the user to rate
-    st.write('Please rate the following jokes:')
-    random_jokes = jokes_df.sample(3)
-    new_ratings = {}
-    for joke_id, joke in zip(random_jokes.index, random_jokes['joke']):
-        st.write(joke)
-        rating = st.slider('Rate this joke', 0, 5, step=1)
-        new_ratings[joke_id] = rating
+    # Randomly select 3 jokes for the user to rate
+    if 'initial_ratings' not in st.session_state:
+        st.session_state.initial_ratings = {}
+        random_jokes = jokes_df.sample(3)
+        for joke_id, joke in zip(random_jokes.index, random_jokes['joke']):
+            st.session_state.initial_ratings[joke_id] = {'joke': joke, 'rating': 3}
 
-    # Add new user's ratings to the data
-    new_ratings_df = pd.DataFrame({
-    'user_id': [new_user_id]*len(new_ratings),
-    'joke_id': list(new_ratings.keys()),
-    'rating': [rating*4 - 10 for rating in new_ratings.values()]  # Convert scale from 0-5 to -10-10
-    })
-    data_df = pd.concat([data_df, new_ratings_df])
+    # Ask user for ratings
+    for joke_id, info in st.session_state.initial_ratings.items():
+        st.write(info['joke'])
+        info['rating'] = st.slider('Rate this joke', 0, 5, step=1, value=info['rating'], key=f'first_{joke_id}')
 
-    # Train model
-    algo = train_model(data_df)
+    if st.button('Submit Ratings'):
+        # Add new user's ratings to the data
+        new_ratings_df = pd.DataFrame({
+            'user_id': [new_user_id]*len(st.session_state.initial_ratings),
+            'joke_id': list(st.session_state.initial_ratings.keys()),
+            'rating': [info['rating']*4 - 10 for info in st.session_state.initial_ratings.values()]  # Convert scale from 0-5 to -10-10
+        })
+        data_df = pd.concat([data_df, new_ratings_df])
 
-    # Recommend jokes based on user's ratings
-    recommended_jokes = recommend_jokes(algo, data_df, jokes_df, new_user_id, new_ratings)
+        # Train model
+        algo = train_model(data_df)
 
-    # Display recommended jokes and ask for user's rating
-    st.write('We recommend the following jokes based on your ratings:')
-    recommended_ratings = {}
-    for joke_id, joke in zip(recommended_jokes.index, recommended_jokes['joke']):
-        st.write(joke)
-        rating = st.slider('Rate this joke', 0, 5, step=1)
-        recommended_ratings[joke_id] = rating
+        # Recommend jokes based on user's ratings
+        recommended_jokes = recommend_jokes(algo, data_df, jokes_df, new_user_id, st.session_state.initial_ratings)
 
-    # Calculate the percentage of total possible score
-    total_score = sum(recommended_ratings.values())
-    percentage_of_total = (total_score / 25) * 100
-    st.write(f'You rated the recommended jokes {percentage_of_total}% of the total possible score.')
+        # Save recommended jokes to session state
+        st.session_state.recommended_jokes = {}
+        for joke_id, joke in zip(recommended_jokes.index, recommended_jokes):
+            st.session_state.recommended_jokes[joke_id] = {'joke': joke, 'rating': 3}
+
+    # Display recommended jokes and ask for user's ratings
+    if 'recommended_jokes' in st.session_state:
+        st.write('We recommend the following jokes based on your ratings:')
+        for joke_id, info in st.session_state.recommended_jokes.items():
+            st.write(info['joke'])
+            info['rating'] = st.slider('Rate this joke', 0, 5, step=1, value=info['rating'], key=f'rec_{joke_id}')
+
+        if st.button('Submit Recommended Ratings'):
+            # Calculate the percentage of total possible score
+            total_score = sum(info['rating'] for info in st.session_state.recommended_jokes.values())
+            percentage_of_total = (total_score / 25) * 100
+            st.write(f'You rated the recommended jokes {percentage_of_total}% of the total possible score.')
 
 if __name__ == '__main__':
     main()
